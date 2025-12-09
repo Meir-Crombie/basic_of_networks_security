@@ -1,6 +1,7 @@
 import argparse,subprocess
 from scapy.all import conf, Ether, IP, UDP, BOOTP, DHCP, RandMAC, sendp, sniff,ARP,srp
 
+
 def get_dhcp_server_ip(iface):
     pkt = (
         Ether(dst="FF:FF:FF:FF:FF:FF") /
